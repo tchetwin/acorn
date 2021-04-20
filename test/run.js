@@ -67,16 +67,16 @@
         parse: acorn.parse
       }
     },
-    Loose: {
-      config: {
-        parse: acorn_loose.parse,
-        loose: true,
-        filter: function (test) {
-          var opts = test.options || {};
-          return opts.loose !== false;
-        }
-      }
-    }
+    // Loose: {
+    //   config: {
+    //     parse: acorn_loose.parse,
+    //     loose: true,
+    //     filter: function (test) {
+    //       var opts = test.options || {};
+    //       return opts.loose !== false;
+    //     }
+    //   }
+    // }
   };
 
   function report(state, code, message) {

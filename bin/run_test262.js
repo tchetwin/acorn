@@ -5,7 +5,6 @@ const parse = require("../acorn").parse
 
 const unsupportedFeatures = [
   "class-fields-private",
-  "class-fields-public",
   "class-methods-private",
   "class-static-fields-private",
   "class-static-fields-public",

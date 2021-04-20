@@ -168,7 +168,7 @@ pp.parseBreakContinueStatement = function(node, keyword) {
   let i = 0
   for (; i < this.labels.length; ++i) {
     let lab = this.labels[i]
-    if (node.label == null || lab.name === node.label.name) {
+    if (node.label === null || lab.name === node.label.name) {
       if (lab.kind != null && (isBreak || lab.kind === "loop")) break
       if (node.label && isBreak) break
     }
@@ -565,6 +565,13 @@ pp.parseFunctionParams = function(node) {
 // `isStatement` parameter).
 
 pp.parseClass = function(node, isStatement) {
+  const oldOuterPrivateBoundNames = this._outerPrivateBoundNames
+  this._outerPrivateBoundNames = this._privateBoundNames
+  this._privateBoundNames = Object.create(this._privateBoundNames || null)
+  const oldOuterUnresolvedPrivateNames = this._outerUnresolvedPrivateNames
+  this._outerUnresolvedPrivateNames = this._unresolvedPrivateNames
+  this._unresolvedPrivateNames = Object.create(null)
+
   this.next()
 
   // ecma-262 14.6 Class Definitions
@@ -591,10 +598,92 @@ pp.parseClass = function(node, isStatement) {
   this.strict = oldStrict
   this.next()
   node.body = this.finishNode(classBody, "ClassBody")
+
+  const unresolvedPrivateNames = this._unresolvedPrivateNames
+  this._privateBoundNames = this._outerPrivateBoundNames
+  this._outerPrivateBoundNames = oldOuterPrivateBoundNames
+  this._unresolvedPrivateNames = this._outerUnresolvedPrivateNames
+  this._outerUnresolvedPrivateNames = oldOuterUnresolvedPrivateNames
+  if (!this._unresolvedPrivateNames) {
+    const names = Object.keys(unresolvedPrivateNames)
+    if (names.length) {
+      names.sort((n1, n2) => unresolvedPrivateNames[n1] - unresolvedPrivateNames[n2])
+      this.raise(unresolvedPrivateNames[names[0]], "Usage of undeclared private name")
+    }
+  } else Object.assign(this._unresolvedPrivateNames, unresolvedPrivateNames)
+
   return this.finishNode(node, isStatement ? "ClassDeclaration" : "ClassExpression")
 }
 
+pp.parsePrivateName = function() {
+  const node = this.startNode()
+  node.name = this.value
+  this.next()
+  this.finishNode(node, "PrivateIdentifier")
+  if (this.options.allowReserved === "never") this.checkUnreserved(node)
+  return node
+}
+
+pp.parsePrivateClassElementName = function(element) {
+  element.computed = false
+  element.key = this.parsePrivateName()
+  if (element.key.name === "constructor") this.raise(element.key.start, "Classes may not have a private element named constructor")
+  const accept = {get: "set", set: "get"}[element.kind]
+  const privateBoundNames = this._privateBoundNames
+  if (Object.prototype.hasOwnProperty.call(privateBoundNames, element.key.name) && privateBoundNames[element.key.name] !== accept) {
+    this.raise(element.start, "Duplicate private element")
+  }
+  privateBoundNames[element.key.name] = element.kind || true
+  delete this._unresolvedPrivateNames[element.key.name]
+  return element.key
+}
+
+pp._maybeParseFieldValue = function(field) {
+  if (this.eat(tt.eq)) {
+    const oldInFieldValue = this._inFieldValue
+    this._inFieldValue = true
+    if (this.type === tt.name && this.value === "await" && (this.inAsync || this.options.allowAwaitOutsideFunction)) {
+      field.value = this.parseAwait()
+    } else field.value = this.parseExpression()
+    this._inFieldValue = oldInFieldValue
+  } else field.value = null
+}
+
 pp.parseClassElement = function(constructorAllowsSuper) {
+  if (this.options.ecmaVersion >= 8 && (this.type === tt.name || this.type.keyword || this.type === tt.privateIdentifierToken || this.type === tt.bracketL || this.type === tt.string || this.type === tt.num)) {
+    const branch = this._branch()
+    if (branch.type === tt.bracketL) {
+      let count = 0
+      do {
+        if (branch.eat(tt.bracketL)) ++count
+        else if (branch.eat(tt.bracketR)) --count
+        else branch.next()
+      } while (count > 0)
+    } else branch.next(true)
+    let isField = branch.type === tt.eq || branch.type === tt.semi
+    if (!isField && branch.canInsertSemicolon()) {
+      isField = branch.type !== tt.parenL
+    }
+    if (isField) {
+      const node = this.startNode()
+      if (this.type === tt.privateIdentifierToken) {
+        this.parsePrivateClassElementName(node)
+      } else {
+        this.parsePropertyName(node)
+      }
+      if ((node.key.type === "Identifier" && node.key.name === "constructor") ||
+          (node.key.type === "Literal" && node.key.value === "constructor")) {
+        this.raise(node.key.start, "Classes may not have a field called constructor")
+      }
+      this.enterScope(64 | 2 | 1) // See acorn's scopeflags.js
+      this._maybeParseFieldValue(node)
+      this.exitScope()
+      this.finishNode(node, "PropertyDefinition")
+      this.semicolon()
+      return node
+    }
+  }
+
   if (this.eat(tt.semi)) return null
 
   let method = this.startNode()
@@ -665,7 +754,15 @@ pp.parseClassId = function(node, isStatement) {
 }
 
 pp.parseClassSuper = function(node) {
+  const privateBoundNames = this._privateBoundNames
+  this._privateBoundNames = this._outerPrivateBoundNames
+  const unresolvedPrivateNames = this._unresolvedPrivateNames
+  this._unresolvedPrivateNames = this._outerUnresolvedPrivateNames
+
   node.superClass = this.eat(tt._extends) ? this.parseExprSubscripts() : null
+
+  this._privateBoundNames = privateBoundNames
+  this._unresolvedPrivateNames = unresolvedPrivateNames
 }
 
 // Parses module export declaration.

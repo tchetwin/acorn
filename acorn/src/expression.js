@@ -253,10 +253,19 @@ pp.parseMaybeUnary = function(refDestructuringErrors, sawUnary) {
     }
   }
 
+  let _return
   if (!sawUnary && this.eat(tt.starstar))
-    return this.buildBinary(startPos, startLoc, expr, this.parseMaybeUnary(null, false), "**", false)
+    _return = this.buildBinary(startPos, startLoc, expr, this.parseMaybeUnary(null, false), "**", false)
   else
-    return expr
+    _return = expr
+
+  if (_return.operator === "delete") {
+    if (_return.argument.type === "MemberExpression" && _return.argument.property.type === "PrivateIdentifier") {
+      this.raise(_return.start, "Private elements may not be deleted")
+    }
+  }
+
+  return _return
 }
 
 // Parse call, dot, and `[]`-subscript expressions.
@@ -298,59 +307,104 @@ pp.parseSubscripts = function(base, startPos, startLoc, noCalls) {
   }
 }
 
-pp.parseSubscript = function(base, startPos, startLoc, noCalls, maybeAsyncArrow, optionalChained) {
-  let optionalSupported = this.options.ecmaVersion >= 11
-  let optional = optionalSupported && this.eat(tt.questionDot)
-  if (noCalls && optional) this.raise(this.lastTokStart, "Optional chaining cannot appear in the callee of new expressions")
+pp._branch = function() {
+  this.__branch = this.__branch || new Parser({ecmaVersion: this.options.ecmaVersion}, this.input)
+  this.__branch.end = this.end
+  this.__branch.pos = this.pos
+  this.__branch.type = this.type
+  this.__branch.value = this.value
+  this.__branch.containsEsc = this.containsEsc
+  return this.__branch
+}
 
-  let computed = this.eat(tt.bracketL)
-  if (computed || (optional && this.type !== tt.parenL && this.type !== tt.backQuote) || this.eat(tt.dot)) {
-    let node = this.startNodeAt(startPos, startLoc)
-    node.object = base
-    node.property = computed ? this.parseExpression() : this.parseIdent(this.options.allowReserved !== "never")
-    node.computed = !!computed
-    if (computed) this.expect(tt.bracketR)
-    if (optionalSupported) {
-      node.optional = optional
+pp.parseSubscript = function(base, startPos, startLoc, noCalls, maybeAsyncArrow, optionalChained) {
+  const optionalSupported = this.options.ecmaVersion >= 11 && tt.questionDot
+  const branch = this._branch()
+
+  if (!(
+    (branch.eat(tt.dot) || (optionalSupported && branch.eat(tt.questionDot))) &&
+    branch.type === tt.privateIdentifierToken
+  )) {
+    let optionalSupported = this.options.ecmaVersion >= 11
+    let optional = optionalSupported && this.eat(tt.questionDot)
+    if (noCalls && optional) this.raise(this.lastTokStart, "Optional chaining cannot appear in the callee of new expressions")
+
+    let computed = this.eat(tt.bracketL)
+    if (computed || (optional && this.type !== tt.parenL && this.type !== tt.backQuote) || this.eat(tt.dot)) {
+      let node = this.startNodeAt(startPos, startLoc)
+      node.object = base
+      node.property = computed ? this.parseExpression() : this.parseIdent(this.options.allowReserved !== "never")
+      node.computed = !!computed
+      if (computed) this.expect(tt.bracketR)
+      if (optionalSupported) {
+        node.optional = optional
+      }
+      base = this.finishNode(node, "MemberExpression")
+    } else if (!noCalls && this.eat(tt.parenL)) {
+      let refDestructuringErrors = new DestructuringErrors, oldYieldPos = this.yieldPos, oldAwaitPos = this.awaitPos, oldAwaitIdentPos = this.awaitIdentPos
+      this.yieldPos = 0
+      this.awaitPos = 0
+      this.awaitIdentPos = 0
+      let exprList = this.parseExprList(tt.parenR, this.options.ecmaVersion >= 8, false, refDestructuringErrors)
+      if (maybeAsyncArrow && !optional && !this.canInsertSemicolon() && this.eat(tt.arrow)) {
+        this.checkPatternErrors(refDestructuringErrors, false)
+        this.checkYieldAwaitInDefaultParams()
+        if (this.awaitIdentPos > 0)
+          this.raise(this.awaitIdentPos, "Cannot use 'await' as identifier inside an async function")
+        this.yieldPos = oldYieldPos
+        this.awaitPos = oldAwaitPos
+        this.awaitIdentPos = oldAwaitIdentPos
+        return this.parseArrowExpression(this.startNodeAt(startPos, startLoc), exprList, true)
+      }
+      this.checkExpressionErrors(refDestructuringErrors, true)
+      this.yieldPos = oldYieldPos || this.yieldPos
+      this.awaitPos = oldAwaitPos || this.awaitPos
+      this.awaitIdentPos = oldAwaitIdentPos || this.awaitIdentPos
+      let node = this.startNodeAt(startPos, startLoc)
+      node.callee = base
+      node.arguments = exprList
+      if (optionalSupported) {
+        node.optional = optional
+      }
+      base = this.finishNode(node, "CallExpression")
+    } else if (this.type === tt.backQuote) {
+      if (optional || optionalChained) {
+        this.raise(this.start, "Optional chaining cannot appear in the tag of tagged template expressions")
+      }
+      let node = this.startNodeAt(startPos, startLoc)
+      node.tag = base
+      node.quasi = this.parseTemplate({isTagged: true})
+      base = this.finishNode(node, "TaggedTemplateExpression")
     }
-    base = this.finishNode(node, "MemberExpression")
-  } else if (!noCalls && this.eat(tt.parenL)) {
-    let refDestructuringErrors = new DestructuringErrors, oldYieldPos = this.yieldPos, oldAwaitPos = this.awaitPos, oldAwaitIdentPos = this.awaitIdentPos
-    this.yieldPos = 0
-    this.awaitPos = 0
-    this.awaitIdentPos = 0
-    let exprList = this.parseExprList(tt.parenR, this.options.ecmaVersion >= 8, false, refDestructuringErrors)
-    if (maybeAsyncArrow && !optional && !this.canInsertSemicolon() && this.eat(tt.arrow)) {
-      this.checkPatternErrors(refDestructuringErrors, false)
-      this.checkYieldAwaitInDefaultParams()
-      if (this.awaitIdentPos > 0)
-        this.raise(this.awaitIdentPos, "Cannot use 'await' as identifier inside an async function")
-      this.yieldPos = oldYieldPos
-      this.awaitPos = oldAwaitPos
-      this.awaitIdentPos = oldAwaitIdentPos
-      return this.parseArrowExpression(this.startNodeAt(startPos, startLoc), exprList, true)
-    }
-    this.checkExpressionErrors(refDestructuringErrors, true)
-    this.yieldPos = oldYieldPos || this.yieldPos
-    this.awaitPos = oldAwaitPos || this.awaitPos
-    this.awaitIdentPos = oldAwaitIdentPos || this.awaitIdentPos
-    let node = this.startNodeAt(startPos, startLoc)
-    node.callee = base
-    node.arguments = exprList
-    if (optionalSupported) {
-      node.optional = optional
-    }
-    base = this.finishNode(node, "CallExpression")
-  } else if (this.type === tt.backQuote) {
-    if (optional || optionalChained) {
-      this.raise(this.start, "Optional chaining cannot appear in the tag of tagged template expressions")
-    }
-    let node = this.startNodeAt(startPos, startLoc)
-    node.tag = base
-    node.quasi = this.parseTemplate({isTagged: true})
-    base = this.finishNode(node, "TaggedTemplateExpression")
+    return base
   }
-  return base
+
+  let optional = false
+  if (!this.eat(tt.dot)) {
+    this.expect(tt.questionDot)
+    optional = true
+  }
+  let node = this.startNodeAt(startPos, startLoc)
+  node.object = base
+  node.computed = false
+  if (optionalSupported) {
+    node.optional = optional
+  }
+  if (this.type === tt.privateIdentifierToken) {
+    if (base.type === "Super") {
+      this.raise(this.start, "Cannot access private element on super")
+    }
+    node.property = this.parsePrivateName()
+    if (!this._privateBoundNames || !this._privateBoundNames[node.property.name]) {
+      if (!this._unresolvedPrivateNames) {
+        this.raise(node.property.start, "Usage of undeclared private name")
+      }
+      this._unresolvedPrivateNames[node.property.name] = node.property.start
+    }
+  } else {
+    node.property = this.parseIdent(true)
+  }
+  return this.finishNode(node, "MemberExpression")
 }
 
 // Parse an atomic expression — either a single token that is an
@@ -1005,6 +1059,9 @@ pp.parseIdent = function(liberal, isBinding) {
     if (node.name === "await" && !this.awaitIdentPos)
       this.awaitIdentPos = node.start
   }
+
+  if (this._inFieldValue && node.name === "arguments") this.raise(node.start, "A class field initializer may not contain arguments")
+
   return node
 }
 

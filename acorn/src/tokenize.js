@@ -385,6 +385,11 @@ pp.getTokenFromCode = function(code) {
 
   case 126: // '~'
     return this.finishOp(tt.prefix, 1)
+
+  case 35: // '#'
+    ++this.pos
+    const word = this.readWord1()
+    return this.finishToken(tt.privateIdentifierToken, word)
   }
 
   this.raise(this.pos, "Unexpected character '" + codePointToString(code) + "'")
