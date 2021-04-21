@@ -5,10 +5,13 @@ if (typeof exports != "undefined") {
   var newNode = (start, props) => Object.assign(new acorn.Node({options: {}}, start), props)
 }
 
+const defaultOptions = {
+  ecmaVersion: 2022
+}
 
 test(`class P extends Q {
   x = await super.x
-}`, {}, {ecmaVersion: 12, allowAwaitOutsideFunction: true})
+}`, {}, {...defaultOptions, allowAwaitOutsideFunction: true})
 
 test(`class Counter extends HTMLElement {
   x = 0;
@@ -20,7 +23,7 @@ test(`class Counter extends HTMLElement {
   render() {
     return this.x.toString();
   }
-}`, {}, {ecmaVersion: 12})
+}`, {}, defaultOptions)
 
 test(`
   class AsyncIterPipe{
@@ -36,13 +39,13 @@ test(`
     // state
     done= false
   }
-`, {}, {ecmaVersion: 12})
+`, {}, defaultOptions)
 
 test(`
   class Class {
     value = getValue();
   }
-`, {}, {ecmaVersion: 12})
+`, {}, defaultOptions)
 
 test(`class Counter extends HTMLElement {
   #x = 0;
@@ -54,22 +57,22 @@ test(`class Counter extends HTMLElement {
   render() {
     return this.#x.toString();
   }
-}`, {}, {ecmaVersion: 12})
-test("class A { a = this.#a; #a = 4 }", {}, {ecmaVersion: 12})
+}`, {}, defaultOptions)
+test("class A { a = this.#a; #a = 4 }", {}, defaultOptions)
 
-test("class A { 5 = 5; #5 = 5 }", {}, {ecmaVersion: 12})
-test("class A { delete = 5; #delete = 5 }", {}, {ecmaVersion: 12})
+test("class A { 5 = 5; #5 = 5 }", {}, defaultOptions)
+test("class A { delete = 5; #delete = 5 }", {}, defaultOptions)
 
-testFail("class A { #a; f() { delete this.#a } }", "Private elements may not be deleted (1:20)", {ecmaVersion: 12})
-testFail("class A { #a; #a }", "Duplicate private element (1:14)", {ecmaVersion: 12})
-testFail("class A { a = this.#a }", "Usage of undeclared private name (1:19)", {ecmaVersion: 12})
-testFail("class A { a = this.#a; b = this.#b }", "Usage of undeclared private name (1:19)", {ecmaVersion: 12})
-testFail("class A { constructor = 4 }", "Classes may not have a field called constructor (1:10)", {ecmaVersion: 12})
-testFail("class A { #constructor = 4 }", "Classes may not have a private element named constructor (1:10)", {ecmaVersion: 12})
-testFail("class A { a = () => arguments }", "A class field initializer may not contain arguments (1:20)", {ecmaVersion: 12})
-testFail("class A { a = () => super() }", "super() call outside constructor of a subclass (1:20)", {ecmaVersion: 12})
-testFail("class A { # a }", "Unexpected token (1:10)", {ecmaVersion: 12})
-testFail("class A { #a; a() { this.# a } }", "Unexpected token (1:27)", {ecmaVersion: 12})
+testFail("class A { #a; f() { delete this.#a } }", "Private elements may not be deleted (1:20)", defaultOptions)
+testFail("class A { #a; #a }", "Duplicate private element (1:14)", defaultOptions)
+testFail("class A { a = this.#a }", "Usage of undeclared private name (1:19)", defaultOptions)
+testFail("class A { a = this.#a; b = this.#b }", "Usage of undeclared private name (1:19)", defaultOptions)
+testFail("class A { constructor = 4 }", "Classes may not have a field called constructor (1:10)", defaultOptions)
+testFail("class A { #constructor = 4 }", "Classes may not have a private element named constructor (1:10)", defaultOptions)
+testFail("class A { a = () => arguments }", "A class field initializer may not contain arguments (1:20)", defaultOptions)
+testFail("class A { a = () => super() }", "super() call outside constructor of a subclass (1:20)", defaultOptions)
+testFail("class A { # a }", "Unexpected token (1:10)", defaultOptions)
+testFail("class A { #a; a() { this.# a } }", "Unexpected token (1:27)", defaultOptions)
 
 const classes = [
   { text: "class A { %s }", ast: getBody => {
@@ -352,27 +355,27 @@ const classes = [
   const body = bodyInput.body, passes = bodyInput.passes, bodyAst = bodyInput.ast
   classes.forEach(input => {
     const text = input.text, ast = input.ast;
-    (passes ? test : testFail)(text.replace("%s", body), ast(bodyAst), {ecmaVersion: 12})
+    (passes ? test : testFail)(text.replace("%s", body), ast(bodyAst), defaultOptions)
   })
 })
 
-testFail("class C { \\u0061sync m(){} };", "Unexpected token (1:21)", {ecmaVersion: 12})
-test("class A extends B { constructor() { super() } }", {}, {ecmaVersion: 12})
-test("var C = class { bre\\u0061k() { return 42; }}", {}, {ecmaVersion: 12})
+testFail("class C { \\u0061sync m(){} };", "Unexpected token (1:21)", defaultOptions)
+test("class A extends B { constructor() { super() } }", {}, defaultOptions)
+test("var C = class { bre\\u0061k() { return 42; }}", {}, defaultOptions)
 test(`class X {
     x
     () {}
-}`, {}, {ecmaVersion: 12})
+}`, {}, defaultOptions)
 test(`class X {
     static x
     () {}
-}`, {}, {ecmaVersion: 12})
+}`, {}, defaultOptions)
 test(`class X {
     get
     y() {}
-}`, {}, {ecmaVersion: 12})
+}`, {}, defaultOptions)
 test(`class X {
     static;
     async;
     y() {}
-}`, {}, {ecmaVersion: 12})
+}`, {}, defaultOptions)
